@@ -1,30 +1,22 @@
 # Courier Archive
 
-Application mobile Android pour scanner les courriers et les archiver localement dans l'archive du téléphone.
+Application Android pour scanner et archiver des courriers localement.
 
-## Fonctionnalités de cette version
-- scanning d'un document depuis la caméra
-- saisie de la référence du courrier
-- choix du type : entrant ou sortant
-- association d'un courrier à un autre via une référence liée
-- recherche par référence, objet, expéditeur ou relation
-- stockage local des documents dans l'application
+## Fonctions
+- Scanner un courrier en plusieurs pages avec le scanner de documents Google Play services (recadrage et import galerie inclus).
+- Enregistrer les pages dans le stockage privé de l'application.
+- Renseigner une référence, un numéro de dossier, un objet, l'expéditeur/destinataire et une référence liée.
+- Rechercher dans l'archive par numéro de dossier, référence du courrier, référence liée, objet ou partie.
+- Migrer automatiquement les anciennes fiches vers le format JSON sans supprimer leurs informations existantes.
 
-## Exemple de relation entre courriers
-- un courrier entrant peut être lié à un courrier sortant via la même référence ou un numéro de dossier
-- la relation est affichée dans la liste de l'archive pour faciliter le contrôle administratif
+## Prérequis
+- Android Studio et JDK 17
+- Un appareil Android avec Google Play services à jour (le scanner n'est pas disponible sur certains appareils sans services Google).
 
-## Stack
-- Kotlin
-- Jetpack Compose
-- Material 3
+## Lancer
+1. Ouvrir le dépôt dans Android Studio et synchroniser Gradle.
+2. Exécuter `app` sur un appareil Android.
+3. Remplir les champs puis appuyer sur **Scanner plusieurs pages**. Dans l'interface du scanner, capturer toutes les pages puis valider.
+4. Utiliser le champ de recherche pour retrouver un dossier ou un numéro.
 
-## Lancement
-1. Ouvrir le projet dans Android Studio
-2. Synchroniser Gradle
-3. Lancer l'application sur un émulateur ou un téléphone Android
-
-## Prochaine évolution
-- export du dossier vers le PC Windows en Wi‑Fi local
-- OCR pour la lecture automatique des références
-- recherche avancée par date, sujet et partie liée
+Les documents restent dans le stockage privé de l'application sur le téléphone. Le transfert vers Windows n'est pas encore implémenté.

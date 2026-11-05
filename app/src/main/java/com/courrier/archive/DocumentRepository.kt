@@ -1,34 +1,41 @@
 package com.courrier.archive
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONException
 
 class DocumentRepository(private val context: Context) {
     private val key = "courier_documents"
+    private val preferences by lazy {
+        context.getSharedPreferences("archive_prefs", Context.MODE_PRIVATE)
+    }
 
     fun load(): List<DocumentRecord> {
-        val raw = context.getSharedPreferences("archive_prefs", Context.MODE_PRIVATE)
-            .getString(key, "")
-            ?: ""
-
+        val raw = preferences.getString(key, "").orEmpty()
         if (raw.isBlank()) return emptyList()
 
-        return raw.split(";")
-            .filter { it.isNotBlank() }
-            .map { DocumentRecord.fromStorageString(it) }
-            .sortedByDescending { it.date.time }
+        return try {
+            val array = JSONArray(raw)
+            (0 until array.length()).mapNotNull { index ->
+                runCatching { DocumentRecord.fromJson(array.getJSONObject(index)) }.getOrNull()
+            }.sortedByDescending { it.date.time }
+        } catch (_: JSONException) {
+            // Migrate existing records stored as semicolon-separated pipe-delimited rows.
+            raw.split(";")
+                .filter { it.isNotBlank() }
+                .mapNotNull { DocumentRecord.fromLegacyStorage(it) }
+                .sortedByDescending { it.date.time }
+                .also { migrated -> if (migrated.isNotEmpty()) save(migrated) }
+        }
     }
 
     fun add(record: DocumentRecord) {
-        val existing = load().toMutableList()
-        existing.add(0, record)
-        save(existing)
+        save(listOf(record) + load())
     }
 
     fun save(records: List<DocumentRecord>) {
-        val value = records.joinToString(";") { it.toStorageString() }
-        context.getSharedPreferences("archive_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .putString(key, value)
-            .apply()
+        val array = JSONArray()
+        records.forEach { array.put(it.toJson()) }
+        preferences.edit().putString(key, array.toString()).apply()
     }
 }

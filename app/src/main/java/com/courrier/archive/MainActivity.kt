@@ -1,11 +1,15 @@
 package com.courrier.archive
 
+import android.app.Activity
+import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -47,8 +51,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
-import java.io.FileOutputStream
 import java.util.Date
 
 class MainActivity : ComponentActivity() {
@@ -67,67 +73,91 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CourierArchiveApp(repository: DocumentRepository) {
     val context = LocalContext.current
+    val activity = context as? Activity
 
     var type by remember { mutableStateOf(DocumentType.INCOMING) }
     var reference by remember { mutableStateOf("") }
+    var folderNumber by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
     var counterpart by remember { mutableStateOf("") }
     var relatedReference by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
+    var statusMessage by remember { mutableStateOf("") }
     var documents by remember { mutableStateOf(repository.load()) }
 
-    val visibleDocuments = documents.filter { document ->
-        val query = searchQuery.trim()
-        if (query.isEmpty()) {
-            true
+    val scannerOptions = remember {
+        GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(50)
+            .setResultFormats(
+                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
+                GmsDocumentScannerOptions.RESULT_FORMAT_PDF
+            )
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+    }
+    val scanner = remember { GmsDocumentScanning.getClient(scannerOptions) }
+
+    val scanLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            try {
+                val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+                val pageUris = scanResult?.pages?.map { it.imageUri }.orEmpty()
+                if (pageUris.isEmpty()) {
+                    statusMessage = "Aucune page reçue du scanner."
+                } else {
+                    val savedPages = pageUris.mapIndexedNotNull { index, uri ->
+                        copyScanPage(context, uri, index)
+                    }
+                    if (savedPages.isNotEmpty()) {
+                        val timestamp = System.currentTimeMillis()
+                        repository.add(
+                            DocumentRecord(
+                                id = timestamp.toString(),
+                                reference = reference.trim().ifBlank { "REF-$timestamp" },
+                                folderNumber = folderNumber.trim(),
+                                subject = subject.trim().ifBlank { "Sans objet" },
+                                type = type,
+                                counterpart = counterpart.trim().ifBlank { "Non renseigné" },
+                                date = Date(timestamp),
+                                notes = notes.trim(),
+                                filePath = savedPages.first(),
+                                linkedReference = relatedReference.trim(),
+                                pagePaths = savedPages
+                            )
+                        )
+                        documents = repository.load()
+                        statusMessage = "Courrier archivé : ${savedPages.size} page(s)."
+                        reference = ""
+                        folderNumber = ""
+                        subject = ""
+                        counterpart = ""
+                        relatedReference = ""
+                        notes = ""
+                    } else {
+                        statusMessage = "Impossible d'enregistrer les pages scannées."
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("CourierArchive", "Erreur lors de l'enregistrement du scan", e)
+                statusMessage = "Erreur lors de l'enregistrement du scan."
+            }
         } else {
-            document.reference.contains(query, ignoreCase = true) ||
-                document.subject.contains(query, ignoreCase = true) ||
-                document.counterpart.contains(query, ignoreCase = true) ||
-                document.linkedReference.contains(query, ignoreCase = true)
+            statusMessage = "Scan annulé."
         }
     }
 
-    val takePicture = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview(),
-        onResult = { bitmap ->
-            if (bitmap != null) {
-                val fileName = "scan_${System.currentTimeMillis()}.jpg"
-                val target = File(context.filesDir, "archives/$fileName")
-                target.parentFile?.mkdirs()
-
-                try {
-                    FileOutputStream(target).use { stream ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                    }
-
-                    val record = DocumentRecord(
-                        id = System.currentTimeMillis().toString(),
-                        reference = reference.ifBlank { "REF-${System.currentTimeMillis()}" },
-                        subject = subject.ifBlank { "Sans objet" },
-                        type = type,
-                        counterpart = counterpart.ifBlank { "Non renseigné" },
-                        date = Date(),
-                        notes = notes,
-                        filePath = target.absolutePath,
-                        linkedReference = relatedReference.trim()
-                    )
-
-                    repository.add(record)
-                    documents = repository.load()
-
-                    reference = ""
-                    subject = ""
-                    counterpart = ""
-                    relatedReference = ""
-                    notes = ""
-                } catch (e: Exception) {
-                    Log.e("CourierArchive", "Erreur lors du scan", e)
-                }
-            }
-        }
-    )
+    val visibleDocuments = documents.filter { document ->
+        val query = searchQuery.trim()
+        query.isEmpty() || document.reference.contains(query, ignoreCase = true) ||
+            document.folderNumber.contains(query, ignoreCase = true) ||
+            document.subject.contains(query, ignoreCase = true) ||
+            document.counterpart.contains(query, ignoreCase = true) ||
+            document.linkedReference.contains(query, ignoreCase = true)
+    }
 
     Scaffold(
         topBar = {
@@ -145,159 +175,87 @@ fun CourierArchiveApp(repository: DocumentRepository) {
                 .fillMaxSize()
                 .padding(padding)
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "Nouveau courrier",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    OutlinedTextField(
-                        value = reference,
-                        onValueChange = { reference = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Référence") }
-                    )
-
-                    OutlinedTextField(
-                        value = subject,
-                        onValueChange = { subject = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Objet") }
-                    )
-
-                    OutlinedTextField(
-                        value = counterpart,
-                        onValueChange = { counterpart = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Expéditeur / destinataire") }
-                    )
-
-                    OutlinedTextField(
-                        value = relatedReference,
-                        onValueChange = { relatedReference = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Référence liée (entrant / sortant)") }
-                    )
-
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { notes = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Notes") }
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = type == DocumentType.INCOMING,
-                            onClick = { type = DocumentType.INCOMING },
-                            label = { Text("Entrant") }
-                        )
-                        FilterChip(
-                            selected = type == DocumentType.OUTGOING,
-                            onClick = { type = DocumentType.OUTGOING },
-                            label = { Text("Sortant") }
-                        )
+                    Text("Nouveau courrier", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(reference, { reference = it }, Modifier.fillMaxWidth(), label = { Text("Référence du courrier") }, singleLine = true)
+                    OutlinedTextField(folderNumber, { folderNumber = it }, Modifier.fillMaxWidth(), label = { Text("Numéro de dossier") }, singleLine = true)
+                    OutlinedTextField(subject, { subject = it }, Modifier.fillMaxWidth(), label = { Text("Objet") }, singleLine = true)
+                    OutlinedTextField(counterpart, { counterpart = it }, Modifier.fillMaxWidth(), label = { Text("Expéditeur / destinataire") }, singleLine = true)
+                    OutlinedTextField(relatedReference, { relatedReference = it }, Modifier.fillMaxWidth(), label = { Text("Référence liée entrant / sortant") }, singleLine = true)
+                    OutlinedTextField(notes, { notes = it }, Modifier.fillMaxWidth(), label = { Text("Notes") })
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = type == DocumentType.INCOMING, onClick = { type = DocumentType.INCOMING }, label = { Text("Entrant") })
+                        FilterChip(selected = type == DocumentType.OUTGOING, onClick = { type = DocumentType.OUTGOING }, label = { Text("Sortant") })
                     }
-
                     Button(
-                        onClick = { takePicture.launch(null) },
+                        onClick = {
+                            if (activity == null) {
+                                statusMessage = "Scanner indisponible dans ce contexte."
+                            } else {
+                                scanner.getStartScanIntent(activity)
+                                    .addOnSuccessListener { intentSender ->
+                                        scanLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+                                    }
+                                    .addOnFailureListener { error ->
+                                        Log.e("CourierArchive", "Impossible de démarrer le scanner", error)
+                                        statusMessage = "Impossible de démarrer le scanner. Vérifiez Google Play services."
+                                    }
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.CameraAlt, contentDescription = null)
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text("Scanner le document")
+                        Spacer(Modifier.size(8.dp))
+                        Text("Scanner plusieurs pages")
+                    }
+                    if (statusMessage.isNotBlank()) {
+                        Text(statusMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Archive, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(
-                    text = "Archive locale",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Spacer(Modifier.size(8.dp))
+                Text("Archive locale", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
 
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Recherche") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                label = { Text("Rechercher par dossier, numéro, référence ou objet") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true
             )
 
             if (visibleDocuments.isEmpty()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
+                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp)
-                            .background(Color(0xFFF3F1F9)),
+                        modifier = Modifier.fillMaxWidth().height(100.dp).background(Color(0xFFF3F1F9)),
                         contentAlignment = Alignment.Center
-                    ) {
-                        Text("Aucun document trouvé dans l'archive")
-                    }
+                    ) { Text("Aucun document trouvé dans l'archive") }
                 }
             } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(visibleDocuments) { document ->
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = document.reference,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(visibleDocuments, key = { it.id }) { document ->
+                        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(document.reference, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                     Text(document.type.label)
                                 }
-
-                                Spacer(modifier = Modifier.height(8.dp))
+                                if (document.folderNumber.isNotBlank()) Text("Dossier : ${document.folderNumber}")
                                 Text(document.subject)
-                                Text("${document.counterpart} • ${document.date.toLocaleString()}")
-
-                                if (document.linkedReference.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "Lié à: ${document.linkedReference}",
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                if (document.notes.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(document.notes)
-                                }
+                                Text("${document.counterpart} • ${document.date}")
+                                Text("${document.pagePaths.size} page(s)", style = MaterialTheme.typography.bodySmall)
+                                if (document.linkedReference.isNotBlank()) Text("Lié à : ${document.linkedReference}", color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
@@ -307,3 +265,18 @@ fun CourierArchiveApp(repository: DocumentRepository) {
     }
 }
 
+private fun copyScanPage(context: Context, uri: Uri, index: Int): String? {
+    val directory = File(context.filesDir, "archives")
+    if (!directory.exists() && !directory.mkdirs()) return null
+    val target = File(directory, "scan_${System.currentTimeMillis()}_$index.jpg")
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        target.absolutePath
+    } catch (e: Exception) {
+        Log.e("CourierArchive", "Erreur copie page scannée", e)
+        target.delete()
+        null
+    }
+}

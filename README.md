@@ -1,27 +1,30 @@
 # Courier Archive
 
-Application Android pour scanner les courriers entrants et sortants, les archiver localement sur l'appareil et gérer les références entre documents.
+Application mobile Android pour scanner les courriers et les archiver localement dans l'archive du téléphone.
 
-## Fonctionnalités
-- Scanner un document depuis l'appareil photo
-- Enregistrer le document avec référence, objet, participant et type
-- Classer les courriers comme entrant ou sortant
-- Archiver localement sur le téléphone
-- Naviguer dans les documents archivés depuis l'app interface
+## Fonctionnalités de cette version
+- scanning d'un document depuis la caméra
+- saisie de la référence du courrier
+- choix du type : entrant ou sortant
+- association d'un courrier à un autre via une référence liée
+- recherche par référence, objet, expéditeur ou relation
+- stockage local des documents dans l'application
+
+## Exemple de relation entre courriers
+- un courrier entrant peut être lié à un courrier sortant via la même référence ou un numéro de dossier
+- la relation est affichée dans la liste de l'archive pour faciliter le contrôle administratif
 
 ## Stack
 - Kotlin
 - Jetpack Compose
 - Material 3
 
-## Déploiement
-1. Ouvrir le projet dans Android Studio.
-2. Synchroniser Gradle.
-3. Lancer l'application sur un émulateur ou un téléphone Android.
+## Lancement
+1. Ouvrir le projet dans Android Studio
+2. Synchroniser Gradle
+3. Lancer l'application sur un émulateur ou un téléphone Android
 
-## Extensibilité
-Le projet est prêt pour les évolutions suivantes :
-- OCR pour extraire le texte des scans
-- recherche par référence, date ou objet
-- connexion vers Windows via Wi‑Fi local
-- association entre courrier entrant et courrier sortant
+## Prochaine évolution
+- export du dossier vers le PC Windows en Wi‑Fi local
+- OCR pour la lecture automatique des références
+- recherche avancée par date, sujet et partie liée

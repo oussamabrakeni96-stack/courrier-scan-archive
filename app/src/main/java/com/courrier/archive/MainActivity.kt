@@ -1,9 +1,15 @@
 package com.courrier.archive
 
+import android.graphics.Bitmap
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,23 +17,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.ChipColors
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,22 +43,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.ui.graphics.Color
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Date
-import android.graphics.Bitmap
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,8 +72,22 @@ fun CourierArchiveApp(repository: DocumentRepository) {
     var reference by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
     var counterpart by remember { mutableStateOf("") }
+    var relatedReference by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
     var documents by remember { mutableStateOf(repository.load()) }
+
+    val visibleDocuments = documents.filter { document ->
+        val query = searchQuery.trim()
+        if (query.isEmpty()) {
+            true
+        } else {
+            document.reference.contains(query, ignoreCase = true) ||
+                document.subject.contains(query, ignoreCase = true) ||
+                document.counterpart.contains(query, ignoreCase = true) ||
+                document.linkedReference.contains(query, ignoreCase = true)
+        }
+    }
 
     val takePicture = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview(),
@@ -84,28 +97,34 @@ fun CourierArchiveApp(repository: DocumentRepository) {
                 val target = File(context.filesDir, "archives/$fileName")
                 target.parentFile?.mkdirs()
 
-                FileOutputStream(target).use { stream ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                try {
+                    FileOutputStream(target).use { stream ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                    }
+
+                    val record = DocumentRecord(
+                        id = System.currentTimeMillis().toString(),
+                        reference = reference.ifBlank { "REF-${System.currentTimeMillis()}" },
+                        subject = subject.ifBlank { "Sans objet" },
+                        type = type,
+                        counterpart = counterpart.ifBlank { "Non renseigné" },
+                        date = Date(),
+                        notes = notes,
+                        filePath = target.absolutePath,
+                        linkedReference = relatedReference.trim()
+                    )
+
+                    repository.add(record)
+                    documents = repository.load()
+
+                    reference = ""
+                    subject = ""
+                    counterpart = ""
+                    relatedReference = ""
+                    notes = ""
+                } catch (e: Exception) {
+                    Log.e("CourierArchive", "Erreur lors du scan", e)
                 }
-
-                val record = DocumentRecord(
-                    id = System.currentTimeMillis().toString(),
-                    reference = reference.ifBlank { "REF-${System.currentTimeMillis()}" },
-                    subject = subject.ifBlank { "Sans objet" },
-                    type = type,
-                    counterpart = counterpart.ifBlank { "Non renseigné" },
-                    date = Date(),
-                    notes = notes,
-                    filePath = target.absolutePath
-                )
-
-                repository.add(record)
-                documents = repository.load()
-
-                reference = ""
-                subject = ""
-                counterpart = ""
-                notes = ""
             }
         }
     )
@@ -164,6 +183,13 @@ fun CourierArchiveApp(repository: DocumentRepository) {
                     )
 
                     OutlinedTextField(
+                        value = relatedReference,
+                        onValueChange = { relatedReference = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Référence liée (entrant / sortant)") }
+                    )
+
+                    OutlinedTextField(
                         value = notes,
                         onValueChange = { notes = it },
                         modifier = Modifier.fillMaxWidth(),
@@ -210,7 +236,15 @@ fun CourierArchiveApp(repository: DocumentRepository) {
                 )
             }
 
-            if (documents.isEmpty()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Recherche") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+            )
+
+            if (visibleDocuments.isEmpty()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp)
@@ -222,14 +256,14 @@ fun CourierArchiveApp(repository: DocumentRepository) {
                             .background(Color(0xFFF3F1F9)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Aucun document dans l'archive")
+                        Text("Aucun document trouvé dans l'archive")
                     }
                 }
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(documents) { document ->
+                    items(visibleDocuments) { document ->
                         Card(
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -246,9 +280,20 @@ fun CourierArchiveApp(repository: DocumentRepository) {
                                     )
                                     Text(document.type.label)
                                 }
+
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(document.subject)
                                 Text("${document.counterpart} • ${document.date.toLocaleString()}")
+
+                                if (document.linkedReference.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Lié à: ${document.linkedReference}",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
                                 if (document.notes.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(document.notes)

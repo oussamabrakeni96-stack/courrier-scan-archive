@@ -15,7 +15,8 @@ data class DocumentRecord(
     val counterpart: String,
     val date: Date,
     val notes: String,
-    val filePath: String
+    val filePath: String,
+    val linkedReference: String = ""
 ) {
     fun toStorageString(): String {
         return listOf(
@@ -26,13 +27,14 @@ data class DocumentRecord(
             counterpart,
             date.time.toString(),
             notes,
-            filePath
+            filePath,
+            linkedReference
         ).joinToString("|")
     }
 
     companion object {
         fun fromStorageString(raw: String): DocumentRecord {
-            val parts = raw.split("|", limit = 8)
+            val parts = raw.split("|", limit = 9)
             return DocumentRecord(
                 id = parts.getOrElse(0) { "" },
                 reference = parts.getOrElse(1) { "" },
@@ -41,7 +43,8 @@ data class DocumentRecord(
                 counterpart = parts.getOrElse(4) { "" },
                 date = Date(parts.getOrElse(5) { "0" }.toLong()),
                 notes = parts.getOrElse(6) { "" },
-                filePath = parts.getOrElse(7) { "" }
+                filePath = parts.getOrElse(7) { "" },
+                linkedReference = parts.getOrElse(8) { "" }
             )
         }
     }

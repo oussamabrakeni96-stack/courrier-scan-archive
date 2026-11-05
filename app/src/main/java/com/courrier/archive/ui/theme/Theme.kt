@@ -1,5 +1,6 @@
 package com.courrier.archive
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -26,9 +27,9 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun CourierArchiveTheme(content: @Composable () -> Unit) {
-    val colors = if (MaterialTheme.colorScheme == LightColors) LightColors else DarkColors
+    val darkTheme = isSystemInDarkTheme()
     MaterialTheme(
-        colorScheme = colors,
+        colorScheme = if (darkTheme) DarkColors else LightColors,
         content = content
     )
 }
